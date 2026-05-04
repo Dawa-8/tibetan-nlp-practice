@@ -1,0 +1,123 @@
+import re
+import os
+import unicodedata
+import time
+
+# --- 配置区 ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+INPUT_FILENAME = "UTIE0OPI3BAC88C1_I1KG15916_bo,sa,zh.txt"
+INPUT_PATH = os.path.join(BASE_DIR, INPUT_FILENAME)
+
+OUTPUT_FOLDER = os.path.join(BASE_DIR, "cleaned_data")
+OUTPUT_FILENAME = "gesar_cleaned.txt"
+
+def clean_tibetan_text(text):
+    """
+    针对藏文格萨尔文本的深度清洗函数 (V5)
+    """
+    # 0. Unicode 标准化 (NFC)
+    text = unicodedata.normalize('NFC', text)
+
+    # --- 1. 合并断行 ---
+    # 规则：一行不是以“། །”或“ག །”结束的话，下一行接到后面
+    lines = text.split('\n')
+    new_lines = []
+    buffer_line = ""
+    # 扩展结束标志，增加容错
+    end_markers = ("། །", "ག །", "།།", "ག།")
+    
+    for line in lines:
+        line = line.strip()
+        if not line: continue
+        
+        if buffer_line:
+            buffer_line += " " + line
+        else:
+            buffer_line = line
+        
+        if buffer_line.endswith(end_markers):
+            new_lines.append(buffer_line)
+            buffer_line = ""
+    
+    if buffer_line:
+        new_lines.append(buffer_line)
+    
+    text = '\n'.join(new_lines)
+
+    # 2. 基础清理：只保留藏文字符区间和换行
+    keep_regex = re.compile(r'[^\u0F00-\u0FFF\n ]+')
+    text = keep_regex.sub('', text)
+
+    # --- 3. 处理 “འ” (\u0F60) 后面的空格 ---
+    text = re.sub(r'\u0F60 +', '\u0F60', text)
+
+    # --- 4. 保护特定结构并转换其他空格 ---
+    text = text.replace("། །", "TEMP_SHAD_SPACE")
+    text = text.replace("ག །", "TEMP_GA_SPACE")
+    
+    # 规则：其他字符之间的空格换成 “་” (Tsheg)
+    text = text.replace(" ", "\u0F0B")
+    
+    # 还原受保护的结构
+    text = text.replace("TEMP_SHAD_SPACE", "། །")
+    text = text.replace("TEMP_GA_SPACE", "ག །")
+
+    # --- 5. 两个或以上的“་”换成一个 ---
+    text = re.sub(r'\u0F0B{2,}', '\u0F0B', text)
+    
+    # --- 6. 将“།་” (\u0F0D\u0F0B) 换成 “།” (\u0F0D) ---
+    text = text.replace("།\u0F0B", "།")
+
+    # --- 7. 字符和“་”之间的空格要删除 ---
+    text = re.sub(r' +\u0F0B', '\u0F0B', text)
+    text = re.sub(r'\u0F0B +', '\u0F0B', text)
+
+    # --- 8. 处理行首 ---
+    # 新需求：一行以“་”、“།”或“།་”开头的，删掉这些开头的字符
+    final_lines = []
+    for line in text.split('\n'):
+        line = line.strip()
+        if not line: continue
+        
+        # 持续检查行首，直到不再以 ་, །, 或 །་ 开头
+        while True:
+            if line.startswith("།་"):
+                line = line[2:].strip()
+            elif line.startswith("་") or line.startswith("།"):
+                line = line[1:].strip()
+            else:
+                break # 行首已经干净了，退出循环
+        
+        if line:
+            final_lines.append(line)
+
+    return '\n'.join(final_lines)
+
+# --- 主程序 ---
+if __name__ == "__main__":
+    print("=" * 50)
+    print("⚔️  格萨尔藏文文本深度清洗程序 (V5) ⚔️")
+    print("=" * 50)
+
+    if not os.path.exists(INPUT_PATH):
+        print(f"❌ 错误：找不到输入文件！")
+        print(f"   请确保 '{INPUT_FILENAME}' 在脚本所在目录。")
+    else:
+        if not os.path.exists(OUTPUT_FOLDER):
+            os.makedirs(OUTPUT_FOLDER)
+
+        print(f"📖 正在执行深度清理任务...")
+        start_time = time.time()
+
+        with open(INPUT_PATH, 'r', encoding='utf-8', errors='ignore') as f:
+            raw_content = f.read()
+
+        cleaned_content = clean_tibetan_text(raw_content)
+        
+        output_path = os.path.join(OUTPUT_FOLDER, OUTPUT_FILENAME)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(cleaned_content)
+        
+        end_time = time.time()
+        print(f"\n🎉 清洗完成！耗时: {end_time - start_time:.2f} 秒")
+        print(f"💾 规范化文本已保存至: {output_path}")
